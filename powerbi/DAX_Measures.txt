@@ -1,0 +1,155 @@
+// ============================================================
+// DAX MEASURES FOR SALES DASHBOARD
+// ============================================================
+
+// ============================================================
+// 1. BASIC SALES MEASURES
+// ============================================================
+
+// Total Sales - Sum of all line totals
+Total Sales = SUM(FactSales[LineTotal])
+
+// Total Quantity - Sum of all units sold
+Total Quantity = SUM(FactSales[OrderQty])
+
+// Average Order Value - Average sales per order
+Average Order Value = 
+AVERAGEX(
+    VALUES(FactSales[SalesOrderID]),
+    CALCULATE(SUM(FactSales[LineTotal]))
+)
+
+// ============================================================
+// 2. TIME INTELLIGENCE MEASURES
+// ============================================================
+
+// Month-to-Date Sales
+Sales MTD = 
+TOTALMTD([Total Sales], DimDate[Date])
+
+// Year-to-Date Sales
+Sales YTD = 
+TOTALYTD([Total Sales], DimDate[Date])
+
+// Previous Month Sales
+Sales Previous Month = 
+CALCULATE([Total Sales], PREVIOUSMONTH(DimDate[Date]))
+
+// Month-over-Month Growth %
+MoM Growth % = 
+VAR CurrentMonth = [Total Sales]
+VAR PreviousMonth = [Sales Previous Month]
+RETURN
+DIVIDE(CurrentMonth - PreviousMonth, PreviousMonth)
+
+// Year-over-Year Sales
+Sales Previous Year = 
+CALCULATE([Total Sales], SAMEPERIODLASTYEAR(DimDate[Date]))
+
+// Year-over-Year Growth %
+YoY Growth % = 
+VAR CurrentYear = [Total Sales]
+VAR PreviousYear = [Sales Previous Year]
+RETURN
+DIVIDE(CurrentYear - PreviousYear, PreviousYear)
+
+// ============================================================
+// 3. PRODUCT ANALYSIS MEASURES
+// ============================================================
+
+// Sales by Product Category
+Sales by Category = 
+SUMMARIZE(
+    DimProduct,
+    DimProduct[CategoryName],
+    "Category Sales", [Total Sales]
+)
+
+// Top N Products by Sales
+Top 10 Products = 
+TOPN(10, VALUES(DimProduct[ProductName]), [Total Sales])
+
+// Product Contribution % (Pareto)
+Product Contribution % = 
+DIVIDE([Total Sales], CALCULATE([Total Sales], ALL(DimProduct)))
+
+// Running Total by Product
+Running Total Product = 
+CALCULATE(
+    [Total Sales],
+    FILTER(
+        ALL(DimProduct),
+        DimProduct[ProductName] <= MAX(DimProduct[ProductName])
+    )
+)
+
+// ============================================================
+// 4. CUSTOMER ANALYSIS MEASURES
+// ============================================================
+
+// Number of Unique Customers
+Unique Customers = DISTINCTCOUNT(FactSales[CustomerKey])
+
+// Average Sales per Customer
+Sales per Customer = DIVIDE([Total Sales], [Unique Customers])
+
+// Customer Ranking by Sales
+Customer Rank = 
+RANKX(
+    ALL(DimCustomer),
+    [Total Sales],
+    ,
+    DESC,
+    Dense
+)
+
+// Customer Segmentation (RFM-like)
+Customer Segment = 
+SWITCH(
+    TRUE(),
+    [Total Sales] >= 10000, "High Value",
+    [Total Sales] >= 5000, "Medium Value",
+    [Total Sales] >= 1000, "Low Value",
+    "At Risk"
+)
+
+// ============================================================
+// 5. GEOGRAPHIC ANALYSIS MEASURES
+// ============================================================
+
+// Sales by Region
+Sales by Region = 
+SUMMARIZE(
+    DimCustomer,
+    DimCustomer[StateProvinceName],
+    "Region Sales", [Total Sales]
+)
+
+// Regional Contribution %
+Regional Contribution % = 
+DIVIDE([Total Sales], CALCULATE([Total Sales], ALL(DimCustomer[StateProvinceName])))
+
+// ============================================================
+// 6. FORECASTING MEASURES
+// ============================================================
+
+// 30-Day Moving Average
+Sales 30 Day MA = 
+CALCULATE(
+    AVERAGEX(DATESINPERIOD(DimDate[Date], LASTDATE(DimDate[Date]), -30, DAY), [Total Sales]),
+    ALL(DimDate)
+)
+
+// ============================================================
+// 7. DYNAMIC TITLES AND FORMATTING
+// ============================================================
+
+// Dynamic Title with Date Range
+Dynamic Title = 
+"Sales Report: " & 
+MIN(DimDate[Date]) & " to " & 
+MAX(DimDate[Date])
+
+// Conditional Formatting for Growth
+Growth Color = 
+IF([YoY Growth %] > 0, "Green", "Red")

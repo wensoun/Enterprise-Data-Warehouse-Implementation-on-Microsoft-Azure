@@ -1,0 +1,36 @@
+- Azure subscription (free tier available)
+- SQL Server 2016+ with AdventureWorks database
+- Power BI Desktop (free)
+- Git (for cloning this repository)
+
+
+# Azure SDK
+azure-identity==1.15.0
+azure-mgmt-datafactory==5.0.0
+azure-mgmt-resource==23.0.0
+azure-storage-blob==12.19.0
+azure-synapse-spark==0.8.0
+azure-synapse-artifacts==0.15.0
+
+# Data processing
+pandas==2.1.0
+numpy==1.24.3
+pyarrow==14.0.1
+pyspark==3.4.1
+
+# Database connectors
+pyodbc==5.0.1
+sqlalchemy==2.0.22
+pymssql==2.2.8
+
+# Monitoring and logging
+azure-monitor-query==1.2.0
+loguru==0.7.2
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Utilities
+python-dotenv==1.0.0
+click==8.1.7

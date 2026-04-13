@@ -1,0 +1,9 @@
+setup/ # SQL scripts for database setup
+├── adf-pipelines/ # Azure Data Factory pipeline JSONs
+├── notebooks/ # Synapse Spark notebooks
+├── stored-procedures/ # T-SQL stored procedures
+├── powerbi/ # Power BI dashboard files
+├── scripts/ # Deployment and monitoring scripts
+├── docs/ # Documentation and diagrams
+└── tests/ # Test scripts
+

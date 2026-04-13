@@ -1,0 +1,118 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "environment": {
+            "type": "string",
+            "defaultValue": "prod",
+            "allowedValues": ["dev", "test", "prod"],
+            "metadata": {
+                "description": "Environment name"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "eastus",
+            "metadata": {
+                "description": "Azure region for deployment"
+            }
+        },
+        "sqlAdminUsername": {
+            "type": "string",
+            "metadata": {
+                "description": "SQL Admin username for Synapse"
+            }
+        },
+        "sqlAdminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "SQL Admin password for Synapse"
+            }
+        }
+    },
+    "variables": {
+        "resourceGroupPrefix": "[concat('rg-edw-', parameters('environment'))]",
+        "storageAccountName": "[concat('adlsedw', parameters('environment'), uniqueString(resourceGroup().id))]",
+        "dataFactoryName": "[concat('adf-edw-', parameters('environment'))]",
+        "synapseWorkspaceName": "[concat('synapse-edw-', parameters('environment'))]",
+        "sqlPoolName": "sqldwedw"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-09-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "isHnsEnabled": true,
+                "supportsHttpsTrafficOnly": true
+            }
+        },
+        {
+            "type": "Microsoft.DataFactory/factories",
+            "apiVersion": "2018-06-01",
+            "name": "[variables('dataFactoryName')]",
+            "location": "[parameters('location')]",
+            "properties": {},
+            "identity": {
+                "type": "SystemAssigned"
+            }
+        },
+        {
+            "type": "Microsoft.Synapse/workspaces",
+            "apiVersion": "2021-06-01",
+            "name": "[variables('synapseWorkspaceName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "defaultDataLakeStorage": {
+                    "accountUrl": "[reference(variables('storageAccountName')).primaryEndpoints.dfs]",
+                    "filesystem": "bronze"
+                },
+                "sqlAdministratorLogin": "[parameters('sqlAdminUsername')]",
+                "sqlAdministratorLoginPassword": "[parameters('sqlAdminPassword')]",
+                "managedResourceGroupName": "[concat('ManagedRG-', variables('synapseWorkspaceName'))]"
+            },
+            "identity": {
+                "type": "SystemAssigned"
+            }
+        },
+        {
+            "type": "Microsoft.Synapse/workspaces/sqlPools",
+            "apiVersion": "2021-06-01",
+            "name": "[concat(variables('synapseWorkspaceName'), '/', variables('sqlPoolName'))]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Synapse/workspaces', variables('synapseWorkspaceName'))]"
+            ],
+            "properties": {
+                "sku": {
+                    "name": "DWU100",
+                    "tier": "Dedicated"
+                },
+                "createMode": "Default"
+            }
+        }
+    ],
+    "outputs": {
+        "storageAccountName": {
+            "type": "string",
+            "value": "[variables('storageAccountName')]"
+        },
+        "dataFactoryName": {
+            "type": "string",
+            "value": "[variables('dataFactoryName')]"
+        },
+        "synapseWorkspaceName": {
+            "type": "string",
+            "value": "[variables('synapseWorkspaceName')]"
+        },
+        "sqlPoolName": {
+            "type": "string",
+            "value": "[variables('sqlPoolName')]"
+        }
+    }
+}

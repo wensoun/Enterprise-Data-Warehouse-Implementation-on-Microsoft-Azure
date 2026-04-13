@@ -1,0 +1,219 @@
+{
+    "name": "pl_cdc_ingest_all",
+    "properties": {
+        "description": "CDC ingestion pipeline for all source tables",
+        "activities": [
+            {
+                "name": "Get High Watermark",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 2,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT TableName, CaptureInstance, LastLSN FROM control.CDCWatermark",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "ds_control_sql",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "Get Current Max LSN",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 2,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlSource",
+                        "sqlReaderQuery": "SELECT sys.fn_cdc_get_max_lsn() AS CurrentMaxLSN",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "ds_sqlserver_cdc",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": true
+                }
+            },
+            {
+                "name": "Set Current Max LSN",
+                "type": "SetVariable",
+                "dependsOn": [
+                    {
+                        "activity": "Get Current Max LSN",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "variableName": "current_max_lsn",
+                    "value": {
+                        "value": "@activity('Get Current Max LSN').output.firstRow.CurrentMaxLSN",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "ForEach Table",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "Get High Watermark",
+                        "dependencyConditions": ["Succeeded"]
+                    },
+                    {
+                        "activity": "Set Current Max LSN",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Get High Watermark').output.value",
+                        "type": "Expression"
+                    },
+                    "isSequential": false,
+                    "batchCount": 5,
+                    "activities": [
+                        {
+                            "name": "Copy CDC Data",
+                            "type": "Copy",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 2,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "source": {
+                                    "type": "SqlSource",
+                                    "sqlReaderQuery": {
+                                        "value": "SELECT [__$operation], [__$start_lsn], * FROM cdc.fn_cdc_get_all_changes_@{item().CaptureInstance}(@{item().LastLSN}, @{variables('current_max_lsn')}, 'all') WHERE [__$operation] IN (1, 2, 4)",
+                                        "type": "Expression"
+                                    },
+                                    "queryTimeout": "02:00:00",
+                                    "partitionOption": "None"
+                                },
+                                "sink": {
+                                    "type": "ParquetSink",
+                                    "storeSettings": {
+                                        "type": "AzureBlobFSWriteSettings"
+                                    },
+                                    "formatSettings": {
+                                        "type": "ParquetWriteSettings"
+                                    }
+                                },
+                                "enableStaging": false,
+                                "translator": {
+                                    "type": "TabularTranslator",
+                                    "typeConversion": true,
+                                    "typeConversionSettings": {
+                                        "allowDataTruncation": true,
+                                        "treatBooleanAsNumber": false
+                                    }
+                                }
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "ds_sqlserver_cdc_parameterized",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "capture_instance": "@item().CaptureInstance",
+                                        "from_lsn": "@item().LastLSN",
+                                        "to_lsn": "@variables('current_max_lsn')"
+                                    }
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "ds_adls_bronze_parquet",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "table_name": "@item().TableName"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Update Watermark",
+                            "type": "SqlServerStoredProcedure",
+                            "dependsOn": [
+                                {
+                                    "activity": "Copy CDC Data",
+                                    "dependencyConditions": ["Succeeded"]
+                                }
+                            ],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 2,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "storedProcedureName": "[control].[usp_UpdateWatermark]",
+                                "storedProcedureParameters": {
+                                    "TableName": {
+                                        "value": "@item().TableName",
+                                        "type": "String"
+                                    },
+                                    "CaptureInstance": {
+                                        "value": "@item().CaptureInstance",
+                                        "type": "String"
+                                    },
+                                    "LastLSN": {
+                                        "value": "@variables('current_max_lsn')",
+                                        "type": "Binary"
+                                    }
+                                }
+                            },
+                            "linkedServiceName": {
+                                "referenceName": "ls_control_sql",
+                                "type": "LinkedServiceReference"
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "variables": {
+            "current_max_lsn": {
+                "type": "String"
+            }
+        },
+        "parameters": {
+            "BatchID": {
+                "type": "Int",
+                "defaultValue": 0
+            }
+        },
+        "folder": {
+            "name": "CDC Pipelines"
+        },
+        "annotations": []
+    }
+}

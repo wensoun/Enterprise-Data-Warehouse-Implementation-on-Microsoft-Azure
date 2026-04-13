@@ -1,0 +1,280 @@
+{
+    "name": "pl_gold_transform",
+    "properties": {
+        "description": "Transform Silver layer normalized data to Gold layer star schema for Power BI",
+        "activities": [
+            {
+                "name": "Get Latest Batch ID",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 2,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT MAX(BatchID) AS LatestBatchID FROM control.ETLAudit WHERE ProcessName LIKE '%silver%' AND Status = 'SUCCESS'",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "ds_control_sql",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": true
+                }
+            },
+            {
+                "name": "Set Batch ID Variable",
+                "type": "SetVariable",
+                "dependsOn": [
+                    {
+                        "activity": "Get Latest Batch ID",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "variableName": "batch_id",
+                    "value": {
+                        "value": "@activity('Get Latest Batch ID').output.firstRow.LatestBatchID",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "Populate DimProduct",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Set Batch ID Variable",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 1,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "gold.usp_Populate_DimProduct",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('batch_id')",
+                            "type": "Int"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Populate DimCustomer",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Populate DimProduct",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 1,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "gold.usp_Populate_DimCustomer",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('batch_id')",
+                            "type": "Int"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Populate DimTerritory",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Populate DimCustomer",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 1,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "gold.usp_Populate_DimTerritory",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('batch_id')",
+                            "type": "Int"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Populate FactSales",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Populate DimTerritory",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 1,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "gold.usp_Populate_FactSales",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('batch_id')",
+                            "type": "Int"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Refresh Power BI Dataset",
+                "type": "Web",
+                "dependsOn": [
+                    {
+                        "activity": "Populate FactSales",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.01:00:00",
+                    "retry": 1,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "url": {
+                        "value": "@concat('https://api.powerbi.com/v1.0/myorg/datasets/', pipeline().parameters.PowerBIDatasetId, '/refreshes')",
+                        "type": "Expression"
+                    },
+                    "connectVia": {
+                        "referenceName": "AutoResolveIntegrationRuntime",
+                        "type": "IntegrationRuntimeReference"
+                    },
+                    "method": "POST",
+                    "headers": {
+                        "Authorization": {
+                            "value": "@pipeline().parameters.PowerBIAccessToken",
+                            "type": "Expression"
+                        },
+                        "Content-Type": "application/json"
+                    },
+                    "body": "{\"notifyOption\": \"MailOnCompletion\"}"
+                }
+            },
+            {
+                "name": "Log Gold Layer Completion",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Refresh Power BI Dataset",
+                        "dependencyConditions": ["Succeeded", "Skipped", "Failed"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "control.usp_LogAudit",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('batch_id')",
+                            "type": "Int"
+                        },
+                        "ProcessName": {
+                            "value": "'pl_gold_transform'",
+                            "type": "String"
+                        },
+                        "TableName": {
+                            "value": "'gold.*'",
+                            "type": "String"
+                        },
+                        "StartTime": {
+                            "value": "@pipeline().TriggerTime",
+                            "type": "DateTime"
+                        },
+                        "Status": {
+                            "value": "'SUCCESS'",
+                            "type": "String"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            }
+        ],
+        "variables": {
+            "batch_id": {
+                "type": "Integer",
+                "defaultValue": 0
+            }
+        },
+        "parameters": {
+            "PowerBIDatasetId": {
+                "type": "String",
+                "defaultValue": ""
+            },
+            "PowerBIAccessToken": {
+                "type": "SecureString",
+                "defaultValue": ""
+            }
+        },
+        "folder": {
+            "name": "Gold Layer Pipelines"
+        },
+        "annotations": []
+    }
+}

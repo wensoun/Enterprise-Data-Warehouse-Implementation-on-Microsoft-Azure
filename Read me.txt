@@ -1,0 +1,45 @@
+data-warehouse-cdc-azure/
+│
+├── README.md
+├── .gitignore
+├── LICENSE
+├── requirements.txt
+├── setup/
+│   ├── 01_enable_cdc.sql
+│   ├── 02_create_control_tables.sql
+│   ├── 03_create_silver_tables.sql
+│   ├── 04_create_gold_tables.sql
+│   └── 05_create_staging_tables.sql
+│
+├── adf-pipelines/
+│   ├── pl_cdc_ingest_all.json
+│   ├── pl_silver_transform.json
+│   ├── pl_gold_transform.json
+│   └── master_pipeline.json
+│
+├── notebooks/
+│   ├── nb_bronze_to_silver_staging.py
+│   ├── nb_silver_to_gold_transform.py
+│   └── nb_data_quality_check.py
+│
+├── stored-procedures/
+│   ├── usp_Merge_DimProduct_SCD_Type2.sql
+│   ├── usp_Merge_DimCustomer_SCD_Type2.sql
+│   ├── usp_Load_FactSalesOrder.sql
+│   ├── usp_Run_Silver_ETL.sql
+│   └── usp_UpdateWatermark.sql
+│
+├── powerbi/
+│   ├── Sales_Dashboard.pbit
+│   ├── sales_dashboard_export.pdf
+│   └── DAX_Measures.txt
+│
+├── scripts/
+│   ├── deploy_arm_template.json
+│   ├── create_resources.ps1
+│   └── monitor_pipeline.py
+│
+├── docs/
+    ├── architecture_diagram.png
+    ├── data_lineage.md
+    └── troubleshooting_guide.md

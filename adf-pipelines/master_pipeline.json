@@ -1,0 +1,387 @@
+{
+    "name": "master_pipeline",
+    "properties": {
+        "description": "Master orchestration pipeline that runs Bronze, Silver, and Gold ETL processes in sequence",
+        "activities": [
+            {
+                "name": "Initialize Master Run",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.05:00:00",
+                    "retry": 1,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "control.usp_GetNextBatchID",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('master_batch_id')",
+                            "type": "Int",
+                            "direction": "Output"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Set Master Batch ID",
+                "type": "SetVariable",
+                "dependsOn": [
+                    {
+                        "activity": "Initialize Master Run",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "variableName": "master_batch_id",
+                    "value": {
+                        "value": "@activity('Initialize Master Run').output.firstRow.BatchID",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "Set Start Time",
+                "type": "SetVariable",
+                "dependsOn": [
+                    {
+                        "activity": "Set Master Batch ID",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "variableName": "start_time",
+                    "value": {
+                        "value": "@utcNow()",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "Run CDC Ingestion Pipeline",
+                "type": "ExecutePipeline",
+                "dependsOn": [
+                    {
+                        "activity": "Set Start Time",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "pipeline": {
+                        "referenceName": "pl_cdc_ingest_all",
+                        "type": "PipelineReference"
+                    },
+                    "waitOnCompletion": true,
+                    "parameters": {
+                        "BatchID": {
+                            "value": "@variables('master_batch_id')",
+                            "type": "expression"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "Check Bronze Layer Success",
+                "type": "IfCondition",
+                "dependsOn": [
+                    {
+                        "activity": "Run CDC Ingestion Pipeline",
+                        "dependencyConditions": ["Succeeded", "Failed", "Skipped"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "expression": {
+                        "value": "@equals(activity('Run CDC Ingestion Pipeline').status, 'Succeeded')",
+                        "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                        {
+                            "name": "Run Silver Transform Pipeline",
+                            "type": "ExecutePipeline",
+                            "dependsOn": [],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "pipeline": {
+                                    "referenceName": "pl_silver_transform",
+                                    "type": "PipelineReference"
+                                },
+                                "waitOnCompletion": true,
+                                "parameters": {
+                                    "BatchID": {
+                                        "value": "@variables('master_batch_id')",
+                                        "type": "expression"
+                                    },
+                                    "ProcessDate": {
+                                        "value": "@utcNow()",
+                                        "type": "expression"
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    "ifFalseActivities": [
+                        {
+                            "name": "Log Bronze Failure",
+                            "type": "SqlPoolStoredProcedure",
+                            "dependsOn": [],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "storedProcedureName": "control.usp_LogError",
+                                "storedProcedureParameters": {
+                                    "BatchID": {
+                                        "value": "@variables('master_batch_id')",
+                                        "type": "Int"
+                                    },
+                                    "ProcessName": {
+                                        "value": "'master_pipeline.Bronze'",
+                                        "type": "String"
+                                    },
+                                    "ErrorMessage": {
+                                        "value": "'CDC ingestion pipeline failed'",
+                                        "type": "String"
+                                    }
+                                }
+                            },
+                            "sqlPool": {
+                                "referenceName": "sqldwedw",
+                                "type": "SqlPoolReference"
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "Check Silver Layer Success",
+                "type": "IfCondition",
+                "dependsOn": [
+                    {
+                        "activity": "Check Bronze Layer Success",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "expression": {
+                        "value": "@equals(activity('Check Bronze Layer Success').ifTrueActivities[0].status, 'Succeeded')",
+                        "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                        {
+                            "name": "Run Gold Transform Pipeline",
+                            "type": "ExecutePipeline",
+                            "dependsOn": [],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "pipeline": {
+                                    "referenceName": "pl_gold_transform",
+                                    "type": "PipelineReference"
+                                },
+                                "waitOnCompletion": true,
+                                "parameters": {
+                                    "PowerBIDatasetId": {
+                                        "value": "@pipeline().parameters.PowerBIDatasetId",
+                                        "type": "expression"
+                                    },
+                                    "PowerBIAccessToken": {
+                                        "value": "@pipeline().parameters.PowerBIAccessToken",
+                                        "type": "expression"
+                                    }
+                                }
+                            }
+                        }
+                    ],
+                    "ifFalseActivities": [
+                        {
+                            "name": "Log Silver Failure",
+                            "type": "SqlPoolStoredProcedure",
+                            "dependsOn": [],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "storedProcedureName": "control.usp_LogError",
+                                "storedProcedureParameters": {
+                                    "BatchID": {
+                                        "value": "@variables('master_batch_id')",
+                                        "type": "Int"
+                                    },
+                                    "ProcessName": {
+                                        "value": "'master_pipeline.Silver'",
+                                        "type": "String"
+                                    },
+                                    "ErrorMessage": {
+                                        "value": "'Silver transform pipeline failed'",
+                                        "type": "String"
+                                    }
+                                }
+                            },
+                            "sqlPool": {
+                                "referenceName": "sqldwedw",
+                                "type": "SqlPoolReference"
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "Send Success Notification",
+                "type": "Web",
+                "dependsOn": [
+                    {
+                        "activity": "Check Silver Layer Success",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.05:00:00",
+                    "retry": 2,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "url": {
+                        "value": "@pipeline().parameters.WebhookUrl",
+                        "type": "Expression"
+                    },
+                    "connectVia": {
+                        "referenceName": "AutoResolveIntegrationRuntime",
+                        "type": "IntegrationRuntimeReference"
+                    },
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "body": {
+                        "value": "{\"text\": \"✅ ETL Master Pipeline Completed Successfully!\\nBatch ID: @{variables('master_batch_id')}\\nDuration: @{variables('duration_minutes')} minutes\\nEnvironment: @{pipeline().parameters.Environment}\"}",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "Calculate Duration",
+                "type": "SetVariable",
+                "dependsOn": [
+                    {
+                        "activity": "Send Success Notification",
+                        "dependencyConditions": ["Succeeded", "Skipped"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "variableName": "duration_minutes",
+                    "value": {
+                        "value": "@div(sub(ticks(utcNow()), ticks(variables('start_time'))), 600000000)",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "Log Master Completion",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Calculate Duration",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "control.usp_LogAudit",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@variables('master_batch_id')",
+                            "type": "Int"
+                        },
+                        "ProcessName": {
+                            "value": "'master_pipeline'",
+                            "type": "String"
+                        },
+                        "TableName": {
+                            "value": "'ALL_LAYERS'",
+                            "type": "String"
+                        },
+                        "StartTime": {
+                            "value": "@variables('start_time')",
+                            "type": "DateTime"
+                        },
+                        "Status": {
+                            "value": "'SUCCESS'",
+                            "type": "String"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            }
+        ],
+        "variables": {
+            "master_batch_id": {
+                "type": "Integer",
+                "defaultValue": 0
+            },
+            "start_time": {
+                "type": "String",
+                "defaultValue": ""
+            },
+            "duration_minutes": {
+                "type": "Integer",
+                "defaultValue": 0
+            }
+        },
+        "parameters": {
+            "Environment": {
+                "type": "String",
+                "defaultValue": "Production",
+                "allowedValues": ["Development", "Test", "Production"]
+            },
+            "WebhookUrl": {
+                "type": "String",
+                "defaultValue": "https://hooks.slack.com/services/your-webhook-url"
+            },
+            "PowerBIDatasetId": {
+                "type": "String",
+                "defaultValue": ""
+            },
+            "PowerBIAccessToken": {
+                "type": "SecureString",
+                "defaultValue": ""
+            },
+            "RunBronzeOnly": {
+                "type": "Bool",
+                "defaultValue": false
+            },
+            "RunSilverOnly": {
+                "type": "Bool",
+                "defaultValue": false
+            },
+            "RunGoldOnly": {
+                "type": "Bool",
+                "defaultValue": false
+            }
+        },
+        "folder": {
+            "name": "Master Orchestration"
+        },
+        "annotations": []
+    }
+}

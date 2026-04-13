@@ -1,0 +1,161 @@
+{
+    "name": "pl_silver_transform",
+    "properties": {
+        "description": "Transform Bronze layer CDC data to Silver normalized warehouse",
+        "activities": [
+            {
+                "name": "Generate Batch ID",
+                "type": "ExecutePipeline",
+                "dependsOn": [],
+                "userProperties": [],
+                "typeProperties": {
+                    "pipeline": {
+                        "referenceName": "pl_generate_batch_id",
+                        "type": "PipelineReference"
+                    },
+                    "waitOnCompletion": true
+                }
+            },
+            {
+                "name": "Bronze to Staging",
+                "type": "SynapseNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "Generate Batch ID",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "notebook": {
+                        "referenceName": "nb_bronze_to_silver_staging",
+                        "type": "NotebookReference"
+                    },
+                    "parameters": {
+                        "BatchID": {
+                            "value": "@pipeline().parameters.BatchID",
+                            "type": "expression"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "Merge DimProduct",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Bronze to Staging",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "silver.usp_Merge_DimProduct_SCD_Type2",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@pipeline().parameters.BatchID",
+                            "type": "Int"
+                        },
+                        "ProcessDate": {
+                            "value": "@pipeline().parameters.ProcessDate",
+                            "type": "DateTime"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Merge DimCustomer",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Merge DimProduct",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "silver.usp_Merge_DimCustomer_SCD_Type2",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@pipeline().parameters.BatchID",
+                            "type": "Int"
+                        },
+                        "ProcessDate": {
+                            "value": "@pipeline().parameters.ProcessDate",
+                            "type": "DateTime"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Load FactSalesOrder",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Merge DimCustomer",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "silver.usp_Load_FactSalesOrder",
+                    "storedProcedureParameters": {
+                        "BatchID": {
+                            "value": "@pipeline().parameters.BatchID",
+                            "type": "Int"
+                        },
+                        "ProcessDate": {
+                            "value": "@pipeline().parameters.ProcessDate",
+                            "type": "DateTime"
+                        }
+                    }
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            },
+            {
+                "name": "Truncate Staging",
+                "type": "SqlPoolStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Load FactSalesOrder",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "staging.usp_Truncate_Staging_Tables",
+                    "storedProcedureParameters": {}
+                },
+                "sqlPool": {
+                    "referenceName": "sqldwedw",
+                    "type": "SqlPoolReference"
+                }
+            }
+        ],
+        "parameters": {
+            "BatchID": {
+                "type": "Int",
+                "defaultValue": 0
+            },
+            "ProcessDate": {
+                "type": "DateTime",
+                "defaultValue": "@utcNow()"
+            }
+        },
+        "folder": {
+            "name": "Transform Pipelines"
+        },
+        "annotations": []
+    }
+}
