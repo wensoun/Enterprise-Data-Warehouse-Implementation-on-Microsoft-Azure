@@ -1,8 +1,6 @@
 data-warehouse-cdc-azure/
 │
 ├── README.md
-├── .gitignore
-├── LICENSE
 ├── requirements.txt
 ├── setup/
 │   ├── 01_enable_cdc.sql
